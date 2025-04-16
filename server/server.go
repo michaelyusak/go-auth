@@ -20,7 +20,7 @@ func Init() {
 
 	db := adaptor.ConnectPostgres(config.Postgres, log)
 
-	router := createRouter(log, db)
+	router := createRouter(log, db, config.Hash)
 
 	srv := http.Server{
 		Handler: router,

@@ -5,24 +5,43 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/michaelyusak/go-auth/config"
+	"github.com/michaelyusak/go-auth/handler"
+	"github.com/michaelyusak/go-auth/helper"
+	"github.com/michaelyusak/go-auth/repository"
+	"github.com/michaelyusak/go-auth/service"
 	helperHandler "github.com/michaelyusak/go-helper/handler"
 	helperMiddleware "github.com/michaelyusak/go-helper/middleware"
 	"github.com/sirupsen/logrus"
 )
 
 type routerOpts struct {
-	common *helperHandler.CommonHandler
+	common  *helperHandler.CommonHandler
+	account *handler.AccountHandler
 }
 
 type helperOpts struct {
 }
 
-func createRouter(log *logrus.Logger, db *sql.DB) *gin.Engine {
+func createRouter(log *logrus.Logger, db *sql.DB, hashConfig config.HashConfig) *gin.Engine {
+	transaction := repository.NewSqlTransaction(db)
+	accountRepo := repository.NewAccountRepositoryPostgres(db)
+
+	hashHelper := helper.NewHashHelperImpl(hashConfig)
+
+	accountService := service.NewAccountService(service.AccountServiceOpt{
+		AccountRepo: accountRepo,
+		Transaction: transaction,
+		Hash:        hashHelper,
+	})
+
 	commonHandler := &helperHandler.CommonHandler{}
+	accountHandler := handler.NewAccountHandler(accountService)
 
 	return newRouter(
 		routerOpts{
-			common: commonHandler,
+			common:  commonHandler,
+			account: accountHandler,
 		},
 		helperOpts{},
 		log,
@@ -63,4 +82,10 @@ func corsRouting(router *gin.Engine, configCors cors.Config) {
 func commonRouting(router *gin.Engine, handler *helperHandler.CommonHandler) {
 	router.GET("/ping", handler.Ping)
 	router.NoRoute(handler.NoRoute)
+}
+
+func accountRouting(router *gin.Engine, handler *handler.AccountHandler) {
+	api := router.Group("v1/account")
+
+	api.POST("/register", handler.Register)
 }

@@ -12,5 +12,8 @@
     "jwt": {
         "issuer": "kredit-plus-xyz",
         "key": "123456789kreditplus123456789"
+    },
+    "hash": {
+        "hash_cost": 1
     }
 }
