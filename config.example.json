@@ -1,0 +1,16 @@
+{
+    "port": "8080",
+    "graceful_period_s": 300,
+    "context_timeot_s": 45,
+    "postgres": {
+        "username": "postgres",
+        "password": "password",
+        "host": "127.0.0.1",
+        "port": "5432",
+        "db_name": "kredit_plus_xyz_db"
+    },
+    "jwt": {
+        "issuer": "kredit-plus-xyz",
+        "key": "123456789kreditplus123456789"
+    }
+}
