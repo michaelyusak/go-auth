@@ -19,4 +19,5 @@ type AccountRepository interface {
 	GetAccountByPhoneNumber(ctx context.Context, phoneNumber string) (*entity.Account, error)
 	Lock(ctx context.Context) error
 	Register(ctx context.Context, newAccount entity.Account) error
+	GetAccountByName(ctx context.Context, name string) (*entity.Account, error)
 }

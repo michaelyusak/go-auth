@@ -32,6 +32,7 @@ type ServiceConfig struct {
 	Postgres       DBConfig   `json:"postgres"`
 	Jwt            JwtConfig  `json:"jwt"`
 	Hash           HashConfig `json:"hash"`
+	AllowedOrigins []string   `json:"allowed_origins"`
 }
 
 func Init(log *logrus.Logger) ServiceConfig {

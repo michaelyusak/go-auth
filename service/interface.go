@@ -8,4 +8,5 @@ import (
 
 type AccountService interface {
 	Register(ctx context.Context, newAccount entity.Account) error
+	Login(ctx context.Context, req entity.LoginReq) error
 }

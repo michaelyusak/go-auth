@@ -15,5 +15,6 @@
     },
     "hash": {
         "hash_cost": 1
-    }
+    },
+    "allowed_origins": ["localhost:3000"]
 }

@@ -6,7 +6,7 @@ require (
 	github.com/gin-contrib/cors v1.7.5
 	github.com/gin-gonic/gin v1.10.0
 	github.com/jackc/pgx/v5 v5.7.4
-	github.com/michaelyusak/go-helper v0.0.0-20250416160706-cc813449a0d0
+	github.com/michaelyusak/go-helper v0.0.0-20250420070424-7da12e280b86
 	github.com/sirupsen/logrus v1.9.3
 	golang.org/x/crypto v0.36.0
 )

@@ -50,7 +50,7 @@ func (r *accountRepositoryPostgres) GetAccountByPhoneNumber(ctx context.Context,
 	FROM accounts
 	WHERE account_phone_number = $1
 		AND deleted_at IS NULL
-`
+	`
 
 	var account entity.Account
 
@@ -86,8 +86,8 @@ func (r *accountRepositoryPostgres) Lock(ctx context.Context) error {
 
 func (r *accountRepositoryPostgres) Register(ctx context.Context, newAccount entity.Account) error {
 	q := `
-		INSERT INTO accounts (account_email, account_phone_number, account_password, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $4)
+		INSERT INTO accounts (account_name, account_email, account_phone_number, account_password, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $5)
 	`
 
 	_, err := r.dbtx.ExecContext(ctx, q)
@@ -96,4 +96,31 @@ func (r *accountRepositoryPostgres) Register(ctx context.Context, newAccount ent
 	}
 
 	return nil
+}
+
+func (r *accountRepositoryPostgres) GetAccountByName(ctx context.Context, name string) (*entity.Account, error) {
+	q := `
+	SELECT account_id, account_name, account_email, account_phone_number, account_password, created_at, updated_at, deleted_at
+	FROM accounts
+	WHERE account_name = $1
+		AND deleted_at IS NULL
+	`
+
+	var account entity.Account
+
+	err := r.dbtx.QueryRowContext(ctx, q, name).Scan(
+		&account.Id,
+		&account.Name,
+		&account.Email,
+		&account.PhoneNumber,
+		&account.Password,
+		&account.CreatedAt,
+		&account.UpdatedAt,
+		&account.DeletedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("[postgres][account_repository][GetAccountByName][QueryRowContext] Error: %w", err)
+	}
+
+	return &account, nil
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/michaelyusak/go-auth/constant"
 	"github.com/michaelyusak/go-auth/entity"
@@ -32,13 +33,6 @@ func NewAccountService(opt AccountServiceOpt) *accountServiceImpl {
 }
 
 func (s *accountServiceImpl) Register(ctx context.Context, newAccount entity.Account) error {
-	if newAccount.Email == "" && newAccount.PhoneNumber == "" {
-		return apperror.BadRequestError(apperror.AppErrorOpt{
-			Message:         "either email or phone number must be provided",
-			ResponseMessage: "either email or phone number must be provided",
-		})
-	}
-
 	if !helper.ValidatePassword(newAccount.Password) {
 		return apperror.BadRequestError(apperror.AppErrorOpt{
 			Message:         constant.MsgInvalidPassword,
@@ -70,28 +64,42 @@ func (s *accountServiceImpl) Register(ctx context.Context, newAccount entity.Acc
 		})
 	}
 
-	var existing *entity.Account
-
-	if newAccount.Email != "" {
-		existing, err = accountRepo.GetAccountByEmail(ctx, newAccount.Email)
-		if err != nil {
-			return apperror.InternalServerError(apperror.AppErrorOpt{
-				Message: fmt.Sprintf("[account_service][Register][accountRepo.GetAccountByEmail] Error: %s", err.Error()),
-			})
-		}
-	} else if newAccount.PhoneNumber != "" {
-		existing, err = accountRepo.GetAccountByPhoneNumber(ctx, newAccount.PhoneNumber)
-		if err != nil {
-			return apperror.InternalServerError(apperror.AppErrorOpt{
-				Message: fmt.Sprintf("[account_service][Register][accountRepo.GetAccountByPhoneNumber] Error: %s", err.Error()),
-			})
-		}
+	existing, err := accountRepo.GetAccountByEmail(ctx, newAccount.Email)
+	if err != nil {
+		return apperror.InternalServerError(apperror.AppErrorOpt{
+			Message: fmt.Sprintf("[account_service][Register][accountRepo.GetAccountByEmail] Error: %s", err.Error()),
+		})
 	}
-
 	if existing != nil {
 		return apperror.BadRequestError(apperror.AppErrorOpt{
 			Message:         "[account_service][Register] email already registered",
 			ResponseMessage: "email already registered",
+		})
+	}
+
+	existing, err = accountRepo.GetAccountByPhoneNumber(ctx, newAccount.PhoneNumber)
+	if err != nil {
+		return apperror.InternalServerError(apperror.AppErrorOpt{
+			Message: fmt.Sprintf("[account_service][Register][accountRepo.GetAccountByPhoneNumber] Error: %s", err.Error()),
+		})
+	}
+	if existing != nil {
+		return apperror.BadRequestError(apperror.AppErrorOpt{
+			Message:         "[account_service][Register] phone number already registered",
+			ResponseMessage: "phone number already registered",
+		})
+	}
+
+	existing, err = accountRepo.GetAccountByName(ctx, newAccount.Name)
+	if err != nil {
+		return apperror.InternalServerError(apperror.AppErrorOpt{
+			Message: fmt.Sprintf("[account_service][Register][accountRepo.GetAccountByName] Error: %s", err.Error()),
+		})
+	}
+	if existing != nil {
+		return apperror.BadRequestError(apperror.AppErrorOpt{
+			Message:         "[account_service][Register] name already registered",
+			ResponseMessage: "name already registered",
 		})
 	}
 
@@ -108,6 +116,81 @@ func (s *accountServiceImpl) Register(ctx context.Context, newAccount entity.Acc
 	if err != nil {
 		return apperror.InternalServerError(apperror.AppErrorOpt{
 			Message: fmt.Sprintf("[account_service][Register][accountRepo.Register] Error: %s", err.Error()),
+		})
+	}
+
+	return nil
+}
+
+func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) error {
+	if req.Email == "" && req.Name == "" {
+		return apperror.BadRequestError(apperror.AppErrorOpt{
+			Message:         "[account_service][Login] either email or name must be provided",
+			ResponseMessage: "either email or name must be provided",
+		})
+	}
+
+	err := s.transaction.Begin()
+	if err != nil {
+		return apperror.InternalServerError(apperror.AppErrorOpt{
+			Message: fmt.Sprintf("[account_service][Login][transaction.Begin] Error: %s", err.Error()),
+		})
+	}
+
+	accountRepo := s.transaction.AccounPostgrestTx()
+
+	defer func() {
+		if err != nil {
+			s.transaction.Rollback()
+		}
+
+		s.transaction.Commit()
+	}()
+
+	err = accountRepo.Lock(ctx)
+	if err != nil {
+		return apperror.InternalServerError(apperror.AppErrorOpt{
+			Message: fmt.Sprintf("[account_service][Login][transaction.AccounPostgrestTx] Error: %s", err.Error()),
+		})
+	}
+
+	var account *entity.Account
+
+	if req.Email != "" {
+		account, err = accountRepo.GetAccountByEmail(ctx, req.Email)
+		if err != nil {
+			return apperror.InternalServerError(apperror.AppErrorOpt{
+				Message: fmt.Sprintf("[account_service][Login][accountRepo.GetAccountByEmail] Error: %s | email: %s", err.Error(), req.Email),
+			})
+		}
+	} else if req.Name != "" {
+		account, err = accountRepo.GetAccountByName(ctx, req.Name)
+		if err != nil {
+			return apperror.InternalServerError(apperror.AppErrorOpt{
+				Message: fmt.Sprintf("[account_service][Login][accountRepo.GetAccountByName] Error: %s | name: %s", err.Error(), req.Name),
+			})
+		}
+	}
+
+	if account == nil {
+		return apperror.NewAppError(apperror.AppErrorOpt{
+			Code:            http.StatusForbidden,
+			Message:         fmt.Sprintf("[account_service][Login] account not found | email: %s | name: %s", req.Email, req.Name),
+			ResponseMessage: constant.MsgAccountNotFound,
+		})
+	}
+
+	isValid, err := s.hash.Check(req.Password, []byte(account.Password))
+	if err != nil {
+		return apperror.InternalServerError(apperror.AppErrorOpt{
+			Message: fmt.Sprintf("[account_service][Login][hash.Check] Error: %s | account_id: %v", err.Error(), account.Id),
+		})
+	}
+
+	if !isValid {
+		return apperror.UnauthorizedError(apperror.AppErrorOpt{
+			Message:         fmt.Sprintf("[account_service][Login] invalid credentials | account_id: %v", account.Id),
+			ResponseMessage: constant.MsgInvalidLogin,
 		})
 	}
 

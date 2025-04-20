@@ -8,7 +8,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/michaelyusak/go-auth/adaptor"
 	"github.com/michaelyusak/go-auth/config"
 	hHelper "github.com/michaelyusak/go-helper/helper"
 )
@@ -18,9 +17,7 @@ func Init() {
 
 	config := config.Init(log)
 
-	db := adaptor.ConnectPostgres(config.Postgres, log)
-
-	router := createRouter(log, db, config.Hash)
+	router := createRouter(log, &config)
 
 	srv := http.Server{
 		Handler: router,
