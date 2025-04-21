@@ -2,7 +2,10 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/michaelyusak/go-auth/entity"
 )
@@ -38,6 +41,10 @@ func (r *accountRepositoryPostgres) GetAccountByEmail(ctx context.Context, email
 		&account.DeletedAt,
 	)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+
 		return nil, fmt.Errorf("[postgres][account_repository][GetAccountByEmail][QueryRowContext] Error: %w", err)
 	}
 
@@ -65,6 +72,10 @@ func (r *accountRepositoryPostgres) GetAccountByPhoneNumber(ctx context.Context,
 		&account.DeletedAt,
 	)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+
 		return nil, fmt.Errorf("[postgres][account_repository][GetAccountByPhoneNumber][QueryRowContext] Error: %w", err)
 	}
 
@@ -90,7 +101,9 @@ func (r *accountRepositoryPostgres) Register(ctx context.Context, newAccount ent
 		VALUES ($1, $2, $3, $4, $5, $5)
 	`
 
-	_, err := r.dbtx.ExecContext(ctx, q)
+	now := time.Now().UnixMilli()
+
+	_, err := r.dbtx.ExecContext(ctx, q, newAccount.Name, newAccount.Email, newAccount.PhoneNumber, newAccount.Password, now)
 	if err != nil {
 		return fmt.Errorf("[postgres][account_repository][Register][ExecContext] Error: %w", err)
 	}
@@ -119,6 +132,10 @@ func (r *accountRepositoryPostgres) GetAccountByName(ctx context.Context, name s
 		&account.DeletedAt,
 	)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+
 		return nil, fmt.Errorf("[postgres][account_repository][GetAccountByName][QueryRowContext] Error: %w", err)
 	}
 

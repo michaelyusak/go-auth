@@ -37,18 +37,16 @@ func Init() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	<-quit
-	log.Info("Server shutdown gracefully ...")
+	log.Infof("Server shutting down in %s ...", time.Duration(config.GracefulPeriod).String())
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.GracefulPeriod)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.GracefulPeriod))
 	defer cancel()
 
 	<-ctx.Done()
 
-	log.Infof("Timeout of %v seconds", config.GracefulPeriod)
-
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("Server shutdown: %s", err.Error())
+		log.Fatalf("Server shut down: %s", err.Error())
 	}
 
-	log.Info("Server exited")
+	log.Info("Server shut down")
 }

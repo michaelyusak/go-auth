@@ -2,26 +2,31 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/michaelyusak/go-auth/constant"
 	"github.com/michaelyusak/go-auth/entity"
 	"github.com/michaelyusak/go-auth/helper"
 	"github.com/michaelyusak/go-auth/repository"
 	"github.com/michaelyusak/go-helper/apperror"
+	hHelper "github.com/michaelyusak/go-helper/helper"
 )
 
 type accountServiceImpl struct {
 	accountRepo repository.AccountRepository
 	transaction repository.Transaction
-	hash        helper.HashHelper
+	hash        hHelper.HashHelper
+	jwt         hHelper.JWTHelper
 }
 
 type AccountServiceOpt struct {
 	AccountRepo repository.AccountRepository
 	Transaction repository.Transaction
-	Hash        helper.HashHelper
+	Hash        hHelper.HashHelper
+	Jwt         hHelper.JWTHelper
 }
 
 func NewAccountService(opt AccountServiceOpt) *accountServiceImpl {
@@ -29,6 +34,7 @@ func NewAccountService(opt AccountServiceOpt) *accountServiceImpl {
 		accountRepo: opt.AccountRepo,
 		transaction: opt.Transaction,
 		hash:        opt.Hash,
+		jwt:         opt.Jwt,
 	}
 }
 
@@ -122,9 +128,9 @@ func (s *accountServiceImpl) Register(ctx context.Context, newAccount entity.Acc
 	return nil
 }
 
-func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) error {
+func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) (*entity.TokenData, error) {
 	if req.Email == "" && req.Name == "" {
-		return apperror.BadRequestError(apperror.AppErrorOpt{
+		return nil, apperror.BadRequestError(apperror.AppErrorOpt{
 			Message:         "[account_service][Login] either email or name must be provided",
 			ResponseMessage: "either email or name must be provided",
 		})
@@ -132,7 +138,7 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) err
 
 	err := s.transaction.Begin()
 	if err != nil {
-		return apperror.InternalServerError(apperror.AppErrorOpt{
+		return nil, apperror.InternalServerError(apperror.AppErrorOpt{
 			Message: fmt.Sprintf("[account_service][Login][transaction.Begin] Error: %s", err.Error()),
 		})
 	}
@@ -149,7 +155,7 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) err
 
 	err = accountRepo.Lock(ctx)
 	if err != nil {
-		return apperror.InternalServerError(apperror.AppErrorOpt{
+		return nil, apperror.InternalServerError(apperror.AppErrorOpt{
 			Message: fmt.Sprintf("[account_service][Login][transaction.AccounPostgrestTx] Error: %s", err.Error()),
 		})
 	}
@@ -159,21 +165,21 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) err
 	if req.Email != "" {
 		account, err = accountRepo.GetAccountByEmail(ctx, req.Email)
 		if err != nil {
-			return apperror.InternalServerError(apperror.AppErrorOpt{
+			return nil, apperror.InternalServerError(apperror.AppErrorOpt{
 				Message: fmt.Sprintf("[account_service][Login][accountRepo.GetAccountByEmail] Error: %s | email: %s", err.Error(), req.Email),
 			})
 		}
 	} else if req.Name != "" {
 		account, err = accountRepo.GetAccountByName(ctx, req.Name)
 		if err != nil {
-			return apperror.InternalServerError(apperror.AppErrorOpt{
+			return nil, apperror.InternalServerError(apperror.AppErrorOpt{
 				Message: fmt.Sprintf("[account_service][Login][accountRepo.GetAccountByName] Error: %s | name: %s", err.Error(), req.Name),
 			})
 		}
 	}
 
 	if account == nil {
-		return apperror.NewAppError(apperror.AppErrorOpt{
+		return nil, apperror.NewAppError(apperror.AppErrorOpt{
 			Code:            http.StatusForbidden,
 			Message:         fmt.Sprintf("[account_service][Login] account not found | email: %s | name: %s", req.Email, req.Name),
 			ResponseMessage: constant.MsgAccountNotFound,
@@ -182,17 +188,56 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) err
 
 	isValid, err := s.hash.Check(req.Password, []byte(account.Password))
 	if err != nil {
-		return apperror.InternalServerError(apperror.AppErrorOpt{
+		return nil, apperror.InternalServerError(apperror.AppErrorOpt{
 			Message: fmt.Sprintf("[account_service][Login][hash.Check] Error: %s | account_id: %v", err.Error(), account.Id),
 		})
 	}
 
 	if !isValid {
-		return apperror.UnauthorizedError(apperror.AppErrorOpt{
+		return nil, apperror.UnauthorizedError(apperror.AppErrorOpt{
 			Message:         fmt.Sprintf("[account_service][Login] invalid credentials | account_id: %v", account.Id),
 			ResponseMessage: constant.MsgInvalidLogin,
 		})
 	}
 
-	return nil
+	customClaims := make(map[string]any)
+	customClaims["account_id"] = account.Id
+	customClaims["email"] = account.Email
+	customClaims["name"] = account.Name
+
+	customClaimsBytes, err := json.Marshal(customClaims)
+	if err != nil {
+		return nil, apperror.InternalServerError(apperror.AppErrorOpt{
+			Message: fmt.Sprintf("[account_service][Login][json.Marshal] Error: %s | account_id: %v", err.Error(), account.Id),
+		})
+	}
+
+	accessTokenExpiredAt := time.Now().Add(30 * time.Minute).UnixMilli()
+
+	accessToken, err := s.jwt.CreateAndSign(customClaimsBytes, accessTokenExpiredAt)
+	if err != nil {
+		return nil, apperror.InternalServerError(apperror.AppErrorOpt{
+			Message: fmt.Sprintf("[account_service][Login][json.Marshal][Access] Error: %s | account_id: %v", err.Error(), account.Id),
+		})
+	}
+
+	refreshTokenExpiredAt := time.Now().Add(24 * time.Hour).UnixMilli()
+
+	refreshToken, err := s.jwt.CreateAndSign(customClaimsBytes, refreshTokenExpiredAt)
+	if err != nil {
+		return nil, apperror.InternalServerError(apperror.AppErrorOpt{
+			Message: fmt.Sprintf("[account_service][Login][json.Marshal][Refresh] Error: %s | account_id: %v", err.Error(), account.Id),
+		})
+	}
+
+	return &entity.TokenData{
+		AccessToken: entity.Token{
+			Token:     accessToken,
+			ExpiredAt: accessTokenExpiredAt,
+		},
+		RefreshToken: entity.Token{
+			Token:     refreshToken,
+			ExpiredAt: refreshTokenExpiredAt,
+		},
+	}, nil
 }

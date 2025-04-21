@@ -59,11 +59,11 @@ func (h *AccountHandler) Login(ctx *gin.Context) {
 	ctxWithTimeout, cancel := context.WithTimeout(ctx.Request.Context(), h.timeout)
 	defer cancel()
 
-	err = h.accountService.Login(ctxWithTimeout, req)
+	data, err := h.accountService.Login(ctxWithTimeout, req)
 	if err != nil {
 		ctx.Error(err)
 		return
 	}
 
-	helper.ResponseOK(ctx, nil)
+	helper.ResponseOK(ctx, data)
 }

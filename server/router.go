@@ -8,10 +8,10 @@ import (
 	"github.com/michaelyusak/go-auth/adaptor"
 	"github.com/michaelyusak/go-auth/config"
 	"github.com/michaelyusak/go-auth/handler"
-	"github.com/michaelyusak/go-auth/helper"
 	"github.com/michaelyusak/go-auth/repository"
 	"github.com/michaelyusak/go-auth/service"
 	helperHandler "github.com/michaelyusak/go-helper/handler"
+	hHelper "github.com/michaelyusak/go-helper/helper"
 	helperMiddleware "github.com/michaelyusak/go-helper/middleware"
 	"github.com/sirupsen/logrus"
 )
@@ -27,12 +27,14 @@ func createRouter(log *logrus.Logger, config *config.ServiceConfig) *gin.Engine 
 	transaction := repository.NewSqlTransaction(db)
 	accountRepo := repository.NewAccountRepositoryPostgres(db)
 
-	hashHelper := helper.NewHashHelperImpl(config.Hash)
+	hashHelper := hHelper.NewHashHelper(config.Hash)
+	jwtHelper := hHelper.NewJWTHelper(config.Jwt.Secret)
 
 	accountService := service.NewAccountService(service.AccountServiceOpt{
 		AccountRepo: accountRepo,
 		Transaction: transaction,
 		Hash:        hashHelper,
+		Jwt:         jwtHelper,
 	})
 
 	commonHandler := &helperHandler.CommonHandler{}
