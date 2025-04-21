@@ -25,7 +25,7 @@ func Init() {
 	}
 
 	go func() {
-		log.Infof("Sever running on port: %s", config.Port)
+		log.Infof("Sever running on port %s", config.Port)
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen: %s\n", err)
@@ -37,6 +37,7 @@ func Init() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	<-quit
+
 	log.Infof("Server shutting down in %s ...", time.Duration(config.GracefulPeriod).String())
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.GracefulPeriod))

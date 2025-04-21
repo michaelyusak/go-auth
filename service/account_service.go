@@ -13,28 +13,38 @@ import (
 	"github.com/michaelyusak/go-auth/repository"
 	"github.com/michaelyusak/go-helper/apperror"
 	hHelper "github.com/michaelyusak/go-helper/helper"
+	"github.com/sirupsen/logrus"
 )
 
 type accountServiceImpl struct {
-	accountRepo repository.AccountRepository
-	transaction repository.Transaction
-	hash        hHelper.HashHelper
-	jwt         hHelper.JWTHelper
+	accountRepo       repository.AccountRepository
+	refreshTokenRepo  repository.RefreshTokenRepository
+	accountDeviceRepo repository.AccountDeviceRepository
+	transaction       repository.Transaction
+	hash              hHelper.HashHelper
+	jwt               hHelper.JWTHelper
+	log               *logrus.Logger
 }
 
 type AccountServiceOpt struct {
-	AccountRepo repository.AccountRepository
-	Transaction repository.Transaction
-	Hash        hHelper.HashHelper
-	Jwt         hHelper.JWTHelper
+	AccountRepo       repository.AccountRepository
+	RefreshTokenRepo  repository.RefreshTokenRepository
+	AccountDeviceRepo repository.AccountDeviceRepository
+	Transaction       repository.Transaction
+	Hash              hHelper.HashHelper
+	Jwt               hHelper.JWTHelper
+	Log               *logrus.Logger
 }
 
 func NewAccountService(opt AccountServiceOpt) *accountServiceImpl {
 	return &accountServiceImpl{
-		accountRepo: opt.AccountRepo,
-		transaction: opt.Transaction,
-		hash:        opt.Hash,
-		jwt:         opt.Jwt,
+		accountRepo:       opt.AccountRepo,
+		refreshTokenRepo:  opt.RefreshTokenRepo,
+		accountDeviceRepo: opt.AccountDeviceRepo,
+		transaction:       opt.Transaction,
+		hash:              opt.Hash,
+		jwt:               opt.Jwt,
+		log:               opt.Log,
 	}
 }
 
@@ -112,16 +122,42 @@ func (s *accountServiceImpl) Register(ctx context.Context, newAccount entity.Acc
 	hash, err := s.hash.Hash(newAccount.Password)
 	if err != nil {
 		return apperror.InternalServerError(apperror.AppErrorOpt{
-			Message: fmt.Sprintf("[account_service][Register][hash.Hash] Error: %s", err.Error()),
+			Message: fmt.Sprintf("[account_service][Register][hash.Hash] passwordHash | Error: %s", err.Error()),
 		})
 	}
 
 	newAccount.Password = hash
 
-	err = accountRepo.Register(ctx, newAccount)
+	accountId, err := accountRepo.Register(ctx, newAccount)
 	if err != nil {
 		return apperror.InternalServerError(apperror.AppErrorOpt{
-			Message: fmt.Sprintf("[account_service][Register][accountRepo.Register] Error: %s", err.Error()),
+			Message: fmt.Sprintf("[account_service][Register][accountRepo.Register] Error: %s | account_id: %v", err.Error(), accountId),
+		})
+	}
+
+	newAccount.Id = accountId
+
+	userAgent := ctx.Value(constant.UserAgentCtxKey).(string)
+	deviceInfo := ctx.Value(constant.DeviceInfoCtxKey).(string)
+
+	deviceHash, err := s.hash.Hash(fmt.Sprintf("%v%s%s", newAccount.Id, userAgent, deviceInfo))
+	if err != nil {
+		return apperror.InternalServerError(apperror.AppErrorOpt{
+			Message: fmt.Sprintf("[account_service][Register][hash.Hash] deviceHash | Error: %s | account_id: %v", err.Error(), newAccount.Id),
+		})
+	}
+
+	accountDevice := entity.AccountDevice{
+		AccountId:  newAccount.Id,
+		DeviceHash: deviceHash,
+		UserAgent:  userAgent,
+		DeviceInfo: deviceInfo,
+	}
+
+	err = s.accountDeviceRepo.InsertDevice(ctx, accountDevice)
+	if err != nil {
+		return apperror.InternalServerError(apperror.AppErrorOpt{
+			Message: fmt.Sprintf("[account_service][Register][accountDeviceRepo.InsertDevice] Error: %s | account_id: %v | device_hash: %s", err.Error(), newAccount.Id, accountDevice.DeviceHash),
 		})
 	}
 
@@ -229,6 +265,19 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) (*e
 			Message: fmt.Sprintf("[account_service][Login][json.Marshal][Refresh] Error: %s | account_id: %v", err.Error(), account.Id),
 		})
 	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		err := s.refreshTokenRepo.InsertToken(ctx, refreshToken, account.Id, refreshTokenExpiredAt)
+		if err != nil {
+			s.log.WithFields(logrus.Fields{
+				"error":      err.Error(),
+				"account_id": account.Id,
+			}).Error("[account_service][Login][refreshTokenRepo.InsertToken]")
+		}
+	}()
 
 	return &entity.TokenData{
 		AccessToken: entity.Token{

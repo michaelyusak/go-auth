@@ -5,8 +5,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michaelyusak/go-auth/constant"
 	"github.com/michaelyusak/go-auth/entity"
 	"github.com/michaelyusak/go-auth/service"
+	"github.com/michaelyusak/go-helper/apperror"
 	"github.com/michaelyusak/go-helper/helper"
 )
 
@@ -25,6 +27,26 @@ func NewAccountHandler(timeout time.Duration, accountService service.AccountServ
 func (h *AccountHandler) Register(ctx *gin.Context) {
 	ctx.Header("Content-Type", "application/json")
 
+	userAgent := ctx.Request.Header.Get(constant.UserAgentHeaderKey)
+	if userAgent == "" {
+		err := apperror.BadRequestError(apperror.AppErrorOpt{
+			ResponseMessage: "User-Agent must not empty",
+		})
+
+		ctx.Error(err)
+		return
+	}
+
+	deviceInfo := ctx.Request.Header.Get(constant.DeviceInfoHeaderKey)
+	if deviceInfo == "" {
+		err := apperror.BadRequestError(apperror.AppErrorOpt{
+			ResponseMessage: "Device-Info must not empty",
+		})
+
+		ctx.Error(err)
+		return
+	}
+
 	var newAccount entity.Account
 
 	err := ctx.ShouldBindJSON(&newAccount)
@@ -33,7 +55,12 @@ func (h *AccountHandler) Register(ctx *gin.Context) {
 		return
 	}
 
-	ctxWithTimeout, cancel := context.WithTimeout(ctx.Request.Context(), h.timeout)
+	c := helper.InjectValues(ctx.Request.Context(), map[any]any{
+		constant.UserAgentCtxKey: userAgent,
+		constant.DeviceInfoCtxKey: deviceInfo,
+	})
+
+	ctxWithTimeout, cancel := context.WithTimeout(c, h.timeout)
 	defer cancel()
 
 	err = h.accountService.Register(ctxWithTimeout, newAccount)

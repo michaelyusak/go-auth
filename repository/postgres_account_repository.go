@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/michaelyusak/go-auth/entity"
 )
@@ -95,20 +94,26 @@ func (r *accountRepositoryPostgres) Lock(ctx context.Context) error {
 	return nil
 }
 
-func (r *accountRepositoryPostgres) Register(ctx context.Context, newAccount entity.Account) error {
+func (r *accountRepositoryPostgres) Register(ctx context.Context, newAccount entity.Account) (int64, error) {
 	q := `
 		INSERT INTO accounts (account_name, account_email, account_phone_number, account_password, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $5)
+		RETURNING account_id
 	`
 
-	now := time.Now().UnixMilli()
+	var accountId int64
 
-	_, err := r.dbtx.ExecContext(ctx, q, newAccount.Name, newAccount.Email, newAccount.PhoneNumber, newAccount.Password, now)
+	err := r.dbtx.QueryRowContext(ctx, q,
+		newAccount.Name,
+		newAccount.Email,
+		newAccount.PhoneNumber,
+		newAccount.Password,
+		nowUnixMilli()).Scan(&accountId)
 	if err != nil {
-		return fmt.Errorf("[postgres][account_repository][Register][ExecContext] Error: %w", err)
+		return accountId, fmt.Errorf("[postgres][account_repository][Register][QueryRowContext] Error: %w", err)
 	}
 
-	return nil
+	return accountId, nil
 }
 
 func (r *accountRepositoryPostgres) GetAccountByName(ctx context.Context, name string) (*entity.Account, error) {

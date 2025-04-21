@@ -26,15 +26,20 @@ func createRouter(log *logrus.Logger, config *config.ServiceConfig) *gin.Engine 
 
 	transaction := repository.NewSqlTransaction(db)
 	accountRepo := repository.NewAccountRepositoryPostgres(db)
+	refreshTokenRepo := repository.NewRefreshTokenRepositoryPostgres(db)
+	accountDeviceRepo := repository.NewAccountDeviceRepositoryPostgres(db)
 
 	hashHelper := hHelper.NewHashHelper(config.Hash)
 	jwtHelper := hHelper.NewJWTHelper(config.Jwt.Secret)
 
 	accountService := service.NewAccountService(service.AccountServiceOpt{
-		AccountRepo: accountRepo,
-		Transaction: transaction,
-		Hash:        hashHelper,
-		Jwt:         jwtHelper,
+		AccountRepo:       accountRepo,
+		RefreshTokenRepo:  refreshTokenRepo,
+		AccountDeviceRepo: accountDeviceRepo,
+		Transaction:       transaction,
+		Hash:              hashHelper,
+		Jwt:               jwtHelper,
+		Log:               log,
 	})
 
 	commonHandler := &helperHandler.CommonHandler{}
