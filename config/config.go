@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/michaelyusak/go-auth/entity"
+	hHelper "github.com/michaelyusak/go-helper/helper"
 	"github.com/sirupsen/logrus"
 )
 
@@ -17,22 +19,19 @@ type DBConfig struct {
 }
 
 type JwtConfig struct {
-	Issuer string `json:"issuer"`
-	Key    string `json:"key"`
-}
-
-type HashConfig struct {
-	HashCost int `json:"hash_cost"`
+	Secret               hHelper.JwtConfig `json:"secret"`
+	AccessTokenDuration  entity.Duration   `json:"access_token_duration"`
+	RefreshTokenDuration entity.Duration   `json:"refresh_token_duration"`
 }
 
 type ServiceConfig struct {
-	Port           string     `json:"port"`
-	GracefulPeriod int64      `json:"graceful_perion_s"`
-	ContextTimeout int64      `json:"context_timeout_s"`
-	Postgres       DBConfig   `json:"postgres"`
-	Jwt            JwtConfig  `json:"jwt"`
-	Hash           HashConfig `json:"hash"`
-	AllowedOrigins []string   `json:"allowed_origins"`
+	Port           string             `json:"port"`
+	GracefulPeriod entity.Duration    `json:"graceful_period"`
+	ContextTimeout entity.Duration    `json:"context_timeout"`
+	Postgres       DBConfig           `json:"postgres"`
+	Jwt            JwtConfig          `json:"jwt"`
+	Hash           hHelper.HashConfig `json:"hash"`
+	AllowedOrigins []string           `json:"allowed_origins"`
 }
 
 func Init(log *logrus.Logger) ServiceConfig {
@@ -40,22 +39,10 @@ func Init(log *logrus.Logger) ServiceConfig {
 
 	var config ServiceConfig
 
-	configFile, err := os.OpenFile(configPath, os.O_RDONLY, 0644)
+	configData, err := os.ReadFile(configPath)
 	if err != nil {
 		log.WithFields(logrus.Fields{
-			"error": fmt.Sprintf("[config][Init][OpenFile] error: %s", err.Error()),
-		}).Fatal("error initiating config file")
-
-		return config
-	}
-	defer configFile.Close()
-
-	var configData []byte
-
-	_, err = configFile.Read(configData)
-	if err != nil {
-		log.WithFields(logrus.Fields{
-			"error": fmt.Sprintf("[config][Init][Read] error: %s", err.Error()),
+			"error": fmt.Sprintf("[config][Init][os.ReadFile] error: %s", err.Error()),
 		}).Fatal("error initiating config file")
 
 		return config
@@ -64,7 +51,7 @@ func Init(log *logrus.Logger) ServiceConfig {
 	err = json.Unmarshal(configData, &config)
 	if err != nil {
 		log.WithFields(logrus.Fields{
-			"error": fmt.Sprintf("[config][Init][Unmarshal] error: %s", err.Error()),
+			"error": fmt.Sprintf("[config][Init][json.Unmarshal] error: %s", err.Error()),
 		}).Fatal("error initiating config file")
 
 		return config
