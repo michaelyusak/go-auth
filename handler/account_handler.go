@@ -75,6 +75,26 @@ func (h *AccountHandler) Register(ctx *gin.Context) {
 func (h *AccountHandler) Login(ctx *gin.Context) {
 	ctx.Header("Content-Type", "application/json")
 
+	userAgent := ctx.Request.Header.Get(constant.UserAgentHeaderKey)
+	if userAgent == "" {
+		err := apperror.BadRequestError(apperror.AppErrorOpt{
+			ResponseMessage: "User-Agent must not empty",
+		})
+
+		ctx.Error(err)
+		return
+	}
+
+	deviceInfo := ctx.Request.Header.Get(constant.DeviceInfoHeaderKey)
+	if deviceInfo == "" {
+		err := apperror.BadRequestError(apperror.AppErrorOpt{
+			ResponseMessage: "Device-Info must not empty",
+		})
+
+		ctx.Error(err)
+		return
+	}
+
 	var req entity.LoginReq
 
 	err := ctx.ShouldBindJSON(&req)
@@ -83,7 +103,12 @@ func (h *AccountHandler) Login(ctx *gin.Context) {
 		return
 	}
 
-	ctxWithTimeout, cancel := context.WithTimeout(ctx.Request.Context(), h.timeout)
+	c := helper.InjectValues(ctx.Request.Context(), map[any]any{
+		constant.UserAgentCtxKey: userAgent,
+		constant.DeviceInfoCtxKey: deviceInfo,
+	})
+
+	ctxWithTimeout, cancel := context.WithTimeout(c, h.timeout)
 	defer cancel()
 
 	data, err := h.accountService.Login(ctxWithTimeout, req)

@@ -10,6 +10,8 @@ type Transaction interface {
 	Rollback() error
 	Commit() error
 	AccounPostgrestTx() *accountRepositoryPostgres
+	RefreshTokenPostgresTx() *refreshTokenRepositoryPostgres
+	AccountDevicePostgresTx() *accountDeviceRepositoryPostgres
 }
 
 type sqlTransaction struct {
@@ -44,6 +46,18 @@ func (s *sqlTransaction) Commit() error {
 
 func (s *sqlTransaction) AccounPostgrestTx() *accountRepositoryPostgres {
 	return &accountRepositoryPostgres{
+		dbtx: s.tx,
+	}
+}
+
+func (s *sqlTransaction) RefreshTokenPostgresTx() *refreshTokenRepositoryPostgres {
+	return &refreshTokenRepositoryPostgres{
+		dbtx: s.tx,
+	}
+}
+
+func (s *sqlTransaction) AccountDevicePostgresTx() *accountDeviceRepositoryPostgres {
+	return &accountDeviceRepositoryPostgres{
 		dbtx: s.tx,
 	}
 }

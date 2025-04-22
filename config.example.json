@@ -2,6 +2,7 @@
     "port": ":8080",
     "graceful_period": "5m",
     "context_timeout": "2m",
+    "sub_routine_context_timeout": "10s",
     "postgres": {
         "username": "postgres",
         "password": "password",

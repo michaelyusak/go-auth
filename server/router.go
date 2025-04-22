@@ -40,6 +40,7 @@ func createRouter(log *logrus.Logger, config *config.ServiceConfig) *gin.Engine 
 		Hash:              hashHelper,
 		Jwt:               jwtHelper,
 		Log:               log,
+		SubRoutineTimeout: time.Duration(config.SubRoutineContextTimeout),
 	})
 
 	commonHandler := &helperHandler.CommonHandler{}

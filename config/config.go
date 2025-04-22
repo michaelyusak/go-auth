@@ -25,13 +25,14 @@ type JwtConfig struct {
 }
 
 type ServiceConfig struct {
-	Port           string             `json:"port"`
-	GracefulPeriod entity.Duration    `json:"graceful_period"`
-	ContextTimeout entity.Duration    `json:"context_timeout"`
-	Postgres       DBConfig           `json:"postgres"`
-	Jwt            JwtConfig          `json:"jwt"`
-	Hash           hHelper.HashConfig `json:"hash"`
-	AllowedOrigins []string           `json:"allowed_origins"`
+	Port                     string             `json:"port"`
+	GracefulPeriod           entity.Duration    `json:"graceful_period"`
+	ContextTimeout           entity.Duration    `json:"context_timeout"`
+	SubRoutineContextTimeout entity.Duration    `json:"sub_routine_context_timeout"`
+	Postgres                 DBConfig           `json:"postgres"`
+	Jwt                      JwtConfig          `json:"jwt"`
+	Hash                     hHelper.HashConfig `json:"hash"`
+	AllowedOrigins           []string           `json:"allowed_origins"`
 }
 
 func Init(log *logrus.Logger) ServiceConfig {

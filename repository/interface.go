@@ -23,9 +23,11 @@ type AccountRepository interface {
 }
 
 type RefreshTokenRepository interface {
-	InsertToken(ctx context.Context, token string, accountId, expiredAt int64) error
+	InsertToken(ctx context.Context, token string, accountId, deviceId, expiredAt int64) error
+	DeleteTokenByAccountId(ctx context.Context, accountId int64) error
 }
 
 type AccountDeviceRepository interface {
-	InsertDevice(ctx context.Context, newDevice entity.AccountDevice) error
+	InsertDevice(ctx context.Context, newDevice entity.AccountDevice) (int64, error)
+	GetDeviceByHash(ctx context.Context, hash string) (*entity.AccountDevice, error)
 }

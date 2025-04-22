@@ -24,6 +24,7 @@ type accountServiceImpl struct {
 	hash              hHelper.HashHelper
 	jwt               hHelper.JWTHelper
 	log               *logrus.Logger
+	subRoutineTimeout time.Duration
 }
 
 type AccountServiceOpt struct {
@@ -34,6 +35,7 @@ type AccountServiceOpt struct {
 	Hash              hHelper.HashHelper
 	Jwt               hHelper.JWTHelper
 	Log               *logrus.Logger
+	SubRoutineTimeout time.Duration
 }
 
 func NewAccountService(opt AccountServiceOpt) *accountServiceImpl {
@@ -45,6 +47,7 @@ func NewAccountService(opt AccountServiceOpt) *accountServiceImpl {
 		hash:              opt.Hash,
 		jwt:               opt.Jwt,
 		log:               opt.Log,
+		subRoutineTimeout: opt.SubRoutineTimeout,
 	}
 }
 
@@ -140,26 +143,28 @@ func (s *accountServiceImpl) Register(ctx context.Context, newAccount entity.Acc
 	userAgent := ctx.Value(constant.UserAgentCtxKey).(string)
 	deviceInfo := ctx.Value(constant.DeviceInfoCtxKey).(string)
 
-	deviceHash, err := s.hash.Hash(fmt.Sprintf("%v%s%s", newAccount.Id, userAgent, deviceInfo))
-	if err != nil {
-		return apperror.InternalServerError(apperror.AppErrorOpt{
-			Message: fmt.Sprintf("[account_service][Register][hash.Hash] deviceHash | Error: %s | account_id: %v", err.Error(), newAccount.Id),
-		})
-	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), s.subRoutineTimeout)
+		defer cancel()
 
-	accountDevice := entity.AccountDevice{
-		AccountId:  newAccount.Id,
-		DeviceHash: deviceHash,
-		UserAgent:  userAgent,
-		DeviceInfo: deviceInfo,
-	}
+		deviceHash := s.hash.HashSHA512(fmt.Sprintf("%v%s%s", newAccount.Id, userAgent, deviceInfo))
 
-	err = s.accountDeviceRepo.InsertDevice(ctx, accountDevice)
-	if err != nil {
-		return apperror.InternalServerError(apperror.AppErrorOpt{
-			Message: fmt.Sprintf("[account_service][Register][accountDeviceRepo.InsertDevice] Error: %s | account_id: %v | device_hash: %s", err.Error(), newAccount.Id, accountDevice.DeviceHash),
-		})
-	}
+		accountDevice := entity.AccountDevice{
+			AccountId:  newAccount.Id,
+			DeviceHash: deviceHash,
+			UserAgent:  userAgent,
+			DeviceInfo: deviceInfo,
+		}
+
+		_, err = s.accountDeviceRepo.InsertDevice(ctx, accountDevice)
+		if err != nil {
+			s.log.WithFields(logrus.Fields{
+				"error":       err.Error(),
+				"account_id":  newAccount.Id,
+				"device_hash": deviceHash,
+			}).Error("[account_service][Register][accountDeviceRepo.InsertDevice][sub-routine]")
+		}
+	}()
 
 	return nil
 }
@@ -180,6 +185,8 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) (*e
 	}
 
 	accountRepo := s.transaction.AccounPostgrestTx()
+	refreshTokenRepo := s.transaction.RefreshTokenPostgresTx()
+	accountDeviceRepo := s.transaction.AccountDevicePostgresTx()
 
 	defer func() {
 		if err != nil {
@@ -236,6 +243,44 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) (*e
 		})
 	}
 
+	userAgent := ctx.Value(constant.UserAgentCtxKey).(string)
+	deviceInfo := ctx.Value(constant.DeviceInfoCtxKey).(string)
+
+	accountDeviceHash := s.hash.HashSHA512(fmt.Sprintf("%v%s%s", account.Id, userAgent, deviceInfo))
+
+	accountDevice, err := accountDeviceRepo.GetDeviceByHash(ctx, accountDeviceHash)
+	if err != nil {
+		return nil, apperror.InternalServerError(apperror.AppErrorOpt{
+			Message: fmt.Sprintf("[account_service][Login][accountDeviceRepo.GetDeviceByHash] Error: %s | account_id: %v", err.Error(), account.Id),
+		})
+	}
+
+	if accountDevice == nil {
+		err = refreshTokenRepo.DeleteTokenByAccountId(ctx, account.Id)
+		if err != nil {
+			return nil, apperror.InternalServerError(apperror.AppErrorOpt{
+				Message: fmt.Sprintf("[account_service][Login][refreshTokenRepo.DeleteTokenByAccountId] Error: %s | account_id: %v", err.Error(), account.Id),
+			})
+		}
+
+		newDevice := entity.AccountDevice{
+			AccountId:  account.Id,
+			DeviceHash: accountDeviceHash,
+			UserAgent:  userAgent,
+			DeviceInfo: deviceInfo,
+		}
+
+		newDeviceId, err := accountDeviceRepo.InsertDevice(ctx, newDevice)
+		if err != nil {
+			return nil, apperror.InternalServerError(apperror.AppErrorOpt{
+				Message: fmt.Sprintf("[account_service][Login][accountDeviceRepo.InsertDevice] Error: %s | account_id: %v", err.Error(), account.Id),
+			})
+		}
+
+		accountDevice = &newDevice
+		accountDevice.DeviceId = newDeviceId
+	}
+
 	customClaims := make(map[string]any)
 	customClaims["account_id"] = account.Id
 	customClaims["email"] = account.Email
@@ -267,15 +312,15 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) (*e
 	}
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), s.subRoutineTimeout)
 		defer cancel()
 
-		err := s.refreshTokenRepo.InsertToken(ctx, refreshToken, account.Id, refreshTokenExpiredAt)
+		err := s.refreshTokenRepo.InsertToken(ctx, refreshToken, account.Id, accountDevice.DeviceId, refreshTokenExpiredAt)
 		if err != nil {
 			s.log.WithFields(logrus.Fields{
 				"error":      err.Error(),
 				"account_id": account.Id,
-			}).Error("[account_service][Login][refreshTokenRepo.InsertToken]")
+			}).Error("[account_service][Login][refreshTokenRepo.InsertToken][sub-routine]")
 		}
 	}()
 
