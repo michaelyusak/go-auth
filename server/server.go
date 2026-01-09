@@ -9,15 +9,19 @@ import (
 	"time"
 
 	"github.com/michaelyusak/go-auth/config"
-	hHelper "github.com/michaelyusak/go-helper/helper"
+	"github.com/michaelyusak/go-auth/log"
+	"github.com/sirupsen/logrus"
 )
 
 func Init() {
-	log := hHelper.NewLogrus()
+	config, err := config.Init()
+	if err != nil {
+		logrus.Panic(err)
+	}
 
-	config := config.Init(log)
+	log.Init(config.LogLevel)
 
-	router := createRouter(log, &config)
+	router := createRouter(&config)
 
 	srv := http.Server{
 		Handler: router,
@@ -25,10 +29,11 @@ func Init() {
 	}
 
 	go func() {
-		log.Infof("Sever running on port %s", config.Port)
+		logrus.Infof("Sever running on port %s", config.Port)
+		APP_HEALTHY = true
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen: %s\n", err)
+			logrus.WithError(err).Fatal("Error while listening")
 		}
 	}()
 
@@ -38,7 +43,9 @@ func Init() {
 
 	<-quit
 
-	log.Infof("Server shutting down in %s ...", time.Duration(config.GracefulPeriod).String())
+	logrus.Infof("Server shutting down in %s ...", time.Duration(config.GracefulPeriod).String())
+
+	APP_HEALTHY = false
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.GracefulPeriod))
 	defer cancel()
@@ -46,8 +53,8 @@ func Init() {
 	<-ctx.Done()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("Server shut down: %s", err.Error())
+		logrus.WithError(err).Fatal("Server shut down")
 	}
 
-	log.Info("Server shut down")
+	logrus.Info("Server shut down")
 }

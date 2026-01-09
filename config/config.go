@@ -1,62 +1,51 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
-	"github.com/michaelyusak/go-auth/entity"
+	hConfig "github.com/michaelyusak/go-helper/config"
+	hEntity "github.com/michaelyusak/go-helper/entity"
 	hHelper "github.com/michaelyusak/go-helper/helper"
-	"github.com/sirupsen/logrus"
 )
-
-type DBConfig struct {
-	Host     string `json:"host"`
-	Port     string `json:"port"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	DbName   string `json:"db_name"`
-}
 
 type JwtConfig struct {
 	Secret               hHelper.JwtConfig `json:"secret"`
-	AccessTokenDuration  entity.Duration   `json:"access_token_duration"`
-	RefreshTokenDuration entity.Duration   `json:"refresh_token_duration"`
+	AccessTokenDuration  hEntity.Duration  `json:"access_token_duration"`
+	RefreshTokenDuration hEntity.Duration  `json:"refresh_token_duration"`
 }
 
-type ServiceConfig struct {
-	Port                     string             `json:"port"`
-	GracefulPeriod           entity.Duration    `json:"graceful_period"`
-	ContextTimeout           entity.Duration    `json:"context_timeout"`
-	SubRoutineContextTimeout entity.Duration    `json:"sub_routine_context_timeout"`
-	Postgres                 DBConfig           `json:"postgres"`
-	Jwt                      JwtConfig          `json:"jwt"`
-	Hash                     hHelper.HashConfig `json:"hash"`
-	AllowedOrigins           []string           `json:"allowed_origins"`
+type ContextTimeoutConfig struct {
+	Main       hEntity.Duration `json:"main"`
+	SubRoutine hEntity.Duration `json:"sub_routine"`
 }
 
-func Init(log *logrus.Logger) ServiceConfig {
+type AuthConfig struct {
+	AllowedIpAddress  []string `json:"allowed_ip_address"`
+	AllowedDeviceInfo []string `json:"allowed_device_info"`
+}
+
+type AppConfig struct {
+	Port           string               `json:"port"`
+	LogLevel       string               `json:"log_level"`
+	GracefulPeriod hEntity.Duration     `json:"graceful_period"`
+	ContextTimeout ContextTimeoutConfig `json:"context_timeout"`
+	Postgres       hEntity.DBConfig     `json:"postgres"`
+	Jwt            JwtConfig            `json:"jwt"`
+	Hash           hHelper.HashConfig   `json:"hash"`
+	AllowedOrigins []string             `json:"allowed_origins"`
+	Auth           AuthConfig           `json:"auth"`
+}
+
+func Init() (AppConfig, error) {
 	configPath := os.Getenv("GO_AUTH_SERVICE_CONFIG")
 
-	var config ServiceConfig
+	var conf AppConfig
 
-	configData, err := os.ReadFile(configPath)
+	conf, err := hConfig.InitFromJson[AppConfig](configPath)
 	if err != nil {
-		log.WithFields(logrus.Fields{
-			"error": fmt.Sprintf("[config][Init][os.ReadFile] error: %s", err.Error()),
-		}).Fatal("error initiating config file")
-
-		return config
+		return conf, fmt.Errorf("[config][Init][hConfig.InitFromJson] Failed to init config from json: %w", err)
 	}
 
-	err = json.Unmarshal(configData, &config)
-	if err != nil {
-		log.WithFields(logrus.Fields{
-			"error": fmt.Sprintf("[config][Init][json.Unmarshal] error: %s", err.Error()),
-		}).Fatal("error initiating config file")
-
-		return config
-	}
-
-	return config
+	return conf, nil
 }
