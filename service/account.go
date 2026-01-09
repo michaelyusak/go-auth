@@ -11,47 +11,46 @@ import (
 	"github.com/michaelyusak/go-auth/entity"
 	"github.com/michaelyusak/go-auth/helper"
 	"github.com/michaelyusak/go-auth/repository"
+	"github.com/michaelyusak/go-helper/appconstant"
 	"github.com/michaelyusak/go-helper/apperror"
+	hEntity "github.com/michaelyusak/go-helper/entity"
 	hHelper "github.com/michaelyusak/go-helper/helper"
 	"github.com/sirupsen/logrus"
 )
 
-type accountServiceImpl struct {
-	accountRepo       repository.AccountRepository
-	refreshTokenRepo  repository.RefreshTokenRepository
-	accountDeviceRepo repository.AccountDeviceRepository
+type account struct {
+	accountRepo       repository.Accounts
+	refreshTokenRepo  repository.RefreshTokens
+	accountDeviceRepo repository.AccountDevices
 	transaction       repository.Transaction
 	hash              hHelper.HashHelper
 	jwt               hHelper.JWTHelper
-	log               *logrus.Logger
 	subRoutineTimeout time.Duration
 }
 
-type AccountServiceOpt struct {
-	AccountRepo       repository.AccountRepository
-	RefreshTokenRepo  repository.RefreshTokenRepository
-	AccountDeviceRepo repository.AccountDeviceRepository
+type AccountOpt struct {
+	AccountRepo       repository.Accounts
+	RefreshTokenRepo  repository.RefreshTokens
+	AccountDeviceRepo repository.AccountDevices
 	Transaction       repository.Transaction
 	Hash              hHelper.HashHelper
 	Jwt               hHelper.JWTHelper
-	Log               *logrus.Logger
 	SubRoutineTimeout time.Duration
 }
 
-func NewAccountService(opt AccountServiceOpt) *accountServiceImpl {
-	return &accountServiceImpl{
+func NewAccount(opt AccountOpt) *account {
+	return &account{
 		accountRepo:       opt.AccountRepo,
 		refreshTokenRepo:  opt.RefreshTokenRepo,
 		accountDeviceRepo: opt.AccountDeviceRepo,
 		transaction:       opt.Transaction,
 		hash:              opt.Hash,
 		jwt:               opt.Jwt,
-		log:               opt.Log,
 		subRoutineTimeout: opt.SubRoutineTimeout,
 	}
 }
 
-func (s *accountServiceImpl) Register(ctx context.Context, newAccount entity.Account) error {
+func (s *account) Register(ctx context.Context, newAccount entity.Account) error {
 	if !helper.ValidatePassword(newAccount.Password) {
 		return apperror.BadRequestError(apperror.AppErrorOpt{
 			Message:         constant.MsgInvalidPassword,
@@ -59,14 +58,14 @@ func (s *accountServiceImpl) Register(ctx context.Context, newAccount entity.Acc
 		})
 	}
 
-	err := s.transaction.Begin()
+	tx, err := s.transaction.Begin()
 	if err != nil {
 		return apperror.InternalServerError(apperror.AppErrorOpt{
 			Message: fmt.Sprintf("[account_service][Register][transaction.Begin] Error: %s", err.Error()),
 		})
 	}
 
-	accountRepo := s.transaction.AccounPostgrestTx()
+	accountTx := s.accountRepo.NewTx(tx)
 
 	defer func() {
 		if err != nil {
@@ -76,14 +75,14 @@ func (s *accountServiceImpl) Register(ctx context.Context, newAccount entity.Acc
 		s.transaction.Commit()
 	}()
 
-	err = accountRepo.Lock(ctx)
+	err = accountTx.Lock(ctx)
 	if err != nil {
 		return apperror.InternalServerError(apperror.AppErrorOpt{
 			Message: fmt.Sprintf("[account_service][Register][transaction.AccounPostgrestTx] Error: %s", err.Error()),
 		})
 	}
 
-	existing, err := accountRepo.GetAccountByEmail(ctx, newAccount.Email)
+	existing, err := accountTx.GetAccountByEmail(ctx, newAccount.Email)
 	if err != nil {
 		return apperror.InternalServerError(apperror.AppErrorOpt{
 			Message: fmt.Sprintf("[account_service][Register][accountRepo.GetAccountByEmail] Error: %s", err.Error()),
@@ -96,7 +95,7 @@ func (s *accountServiceImpl) Register(ctx context.Context, newAccount entity.Acc
 		})
 	}
 
-	existing, err = accountRepo.GetAccountByPhoneNumber(ctx, newAccount.PhoneNumber)
+	existing, err = accountTx.GetAccountByPhoneNumber(ctx, newAccount.PhoneNumber)
 	if err != nil {
 		return apperror.InternalServerError(apperror.AppErrorOpt{
 			Message: fmt.Sprintf("[account_service][Register][accountRepo.GetAccountByPhoneNumber] Error: %s", err.Error()),
@@ -109,7 +108,7 @@ func (s *accountServiceImpl) Register(ctx context.Context, newAccount entity.Acc
 		})
 	}
 
-	existing, err = accountRepo.GetAccountByName(ctx, newAccount.Name)
+	existing, err = accountTx.GetAccountByName(ctx, newAccount.Name)
 	if err != nil {
 		return apperror.InternalServerError(apperror.AppErrorOpt{
 			Message: fmt.Sprintf("[account_service][Register][accountRepo.GetAccountByName] Error: %s", err.Error()),
@@ -131,7 +130,7 @@ func (s *accountServiceImpl) Register(ctx context.Context, newAccount entity.Acc
 
 	newAccount.Password = hash
 
-	accountId, err := accountRepo.Register(ctx, newAccount)
+	accountId, err := accountTx.Register(ctx, newAccount)
 	if err != nil {
 		return apperror.InternalServerError(apperror.AppErrorOpt{
 			Message: fmt.Sprintf("[account_service][Register][accountRepo.Register] Error: %s | account_id: %v", err.Error(), accountId),
@@ -140,14 +139,14 @@ func (s *accountServiceImpl) Register(ctx context.Context, newAccount entity.Acc
 
 	newAccount.Id = accountId
 
-	userAgent := ctx.Value(constant.UserAgentCtxKey).(string)
-	deviceInfo := ctx.Value(constant.DeviceInfoCtxKey).(string)
+	userAgent := ctx.Value(appconstant.UserAgentKey).(string)
+	deviceInfo := ctx.Value(appconstant.DeviceInfokey).(string)
+
+	deviceHash := hHelper.GenerateDeviceHash(ctx, accountId)
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), s.subRoutineTimeout)
 		defer cancel()
-
-		deviceHash := s.hash.HashSHA512(fmt.Sprintf("%v%s%s", newAccount.Id, userAgent, deviceInfo))
 
 		accountDevice := entity.AccountDevice{
 			AccountId:  newAccount.Id,
@@ -158,7 +157,7 @@ func (s *accountServiceImpl) Register(ctx context.Context, newAccount entity.Acc
 
 		_, err = s.accountDeviceRepo.InsertDevice(ctx, accountDevice)
 		if err != nil {
-			s.log.WithFields(logrus.Fields{
+			logrus.WithFields(logrus.Fields{
 				"error":       err.Error(),
 				"account_id":  newAccount.Id,
 				"device_hash": deviceHash,
@@ -169,7 +168,7 @@ func (s *accountServiceImpl) Register(ctx context.Context, newAccount entity.Acc
 	return nil
 }
 
-func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) (*entity.TokenData, error) {
+func (s *account) Login(ctx context.Context, req entity.LoginReq) (*entity.TokenData, error) {
 	if req.Email == "" && req.Name == "" {
 		return nil, apperror.BadRequestError(apperror.AppErrorOpt{
 			Message:         "[account_service][Login] either email or name must be provided",
@@ -177,16 +176,16 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) (*e
 		})
 	}
 
-	err := s.transaction.Begin()
+	tx, err := s.transaction.Begin()
 	if err != nil {
 		return nil, apperror.InternalServerError(apperror.AppErrorOpt{
 			Message: fmt.Sprintf("[account_service][Login][transaction.Begin] Error: %s", err.Error()),
 		})
 	}
 
-	accountRepo := s.transaction.AccounPostgrestTx()
-	refreshTokenRepo := s.transaction.RefreshTokenPostgresTx()
-	accountDeviceRepo := s.transaction.AccountDevicePostgresTx()
+	accountTx := s.accountRepo.NewTx(tx)
+	refreshTokenTx := s.refreshTokenRepo.NewTx(tx)
+	accountDeviceTx := s.accountDeviceRepo.NewTx(tx)
 
 	defer func() {
 		if err != nil {
@@ -196,7 +195,7 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) (*e
 		s.transaction.Commit()
 	}()
 
-	err = accountRepo.Lock(ctx)
+	err = accountTx.Lock(ctx)
 	if err != nil {
 		return nil, apperror.InternalServerError(apperror.AppErrorOpt{
 			Message: fmt.Sprintf("[account_service][Login][transaction.AccounPostgrestTx] Error: %s", err.Error()),
@@ -206,17 +205,17 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) (*e
 	var account *entity.Account
 
 	if req.Email != "" {
-		account, err = accountRepo.GetAccountByEmail(ctx, req.Email)
+		account, err = accountTx.GetAccountByEmail(ctx, req.Email)
 		if err != nil {
 			return nil, apperror.InternalServerError(apperror.AppErrorOpt{
-				Message: fmt.Sprintf("[account_service][Login][accountRepo.GetAccountByEmail] Error: %s | email: %s", err.Error(), req.Email),
+				Message: fmt.Sprintf("[account_service][Login][accountTx.GetAccountByEmail] Error: %s | email: %s", err.Error(), req.Email),
 			})
 		}
 	} else if req.Name != "" {
-		account, err = accountRepo.GetAccountByName(ctx, req.Name)
+		account, err = accountTx.GetAccountByName(ctx, req.Name)
 		if err != nil {
 			return nil, apperror.InternalServerError(apperror.AppErrorOpt{
-				Message: fmt.Sprintf("[account_service][Login][accountRepo.GetAccountByName] Error: %s | name: %s", err.Error(), req.Name),
+				Message: fmt.Sprintf("[account_service][Login][accountTx.GetAccountByName] Error: %s | name: %s", err.Error(), req.Name),
 			})
 		}
 	}
@@ -243,25 +242,25 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) (*e
 		})
 	}
 
-	userAgent := ctx.Value(constant.UserAgentCtxKey).(string)
-	deviceInfo := ctx.Value(constant.DeviceInfoCtxKey).(string)
+	accountDeviceHash := hHelper.GenerateDeviceHash(ctx, account.Id)
 
-	accountDeviceHash := s.hash.HashSHA512(fmt.Sprintf("%v%s%s", account.Id, userAgent, deviceInfo))
-
-	accountDevice, err := accountDeviceRepo.GetDeviceByHash(ctx, accountDeviceHash)
+	accountDevice, err := accountDeviceTx.GetDeviceByHashAndAccountId(ctx, accountDeviceHash, account.Id)
 	if err != nil {
 		return nil, apperror.InternalServerError(apperror.AppErrorOpt{
-			Message: fmt.Sprintf("[account_service][Login][accountDeviceRepo.GetDeviceByHash] Error: %s | account_id: %v", err.Error(), account.Id),
+			Message: fmt.Sprintf("[account_service][Login][accountDeviceTx.GetDeviceByHash] Error: %s | account_id: %v", err.Error(), account.Id),
 		})
 	}
 
 	if accountDevice == nil {
-		err = refreshTokenRepo.DeleteTokenByAccountId(ctx, account.Id)
+		err = refreshTokenTx.DeleteTokenByAccountId(ctx, account.Id)
 		if err != nil {
 			return nil, apperror.InternalServerError(apperror.AppErrorOpt{
-				Message: fmt.Sprintf("[account_service][Login][refreshTokenRepo.DeleteTokenByAccountId] Error: %s | account_id: %v", err.Error(), account.Id),
+				Message: fmt.Sprintf("[account_service][Login][refreshTokenTx.DeleteTokenByAccountId] Error: %s | account_id: %v", err.Error(), account.Id),
 			})
 		}
+
+		userAgent := ctx.Value(appconstant.UserAgentKey).(string)
+		deviceInfo := ctx.Value(appconstant.DeviceInfokey).(string)
 
 		newDevice := entity.AccountDevice{
 			AccountId:  account.Id,
@@ -270,10 +269,10 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) (*e
 			DeviceInfo: deviceInfo,
 		}
 
-		newDeviceId, err := accountDeviceRepo.InsertDevice(ctx, newDevice)
+		newDeviceId, err := accountDeviceTx.InsertDevice(ctx, newDevice)
 		if err != nil {
 			return nil, apperror.InternalServerError(apperror.AppErrorOpt{
-				Message: fmt.Sprintf("[account_service][Login][accountDeviceRepo.InsertDevice] Error: %s | account_id: %v", err.Error(), account.Id),
+				Message: fmt.Sprintf("[account_service][Login][accountDeviceTx.InsertDevice] Error: %s | account_id: %v", err.Error(), account.Id),
 			})
 		}
 
@@ -281,10 +280,12 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) (*e
 		accountDevice.DeviceId = newDeviceId
 	}
 
-	customClaims := make(map[string]any)
-	customClaims["account_id"] = account.Id
-	customClaims["email"] = account.Email
-	customClaims["name"] = account.Name
+	customClaims := hEntity.JwtCustomClaims{
+		AccountId: account.Id,
+		Email:     account.Email,
+		Name:      account.Name,
+		DeviceId:  accountDevice.DeviceId,
+	}
 
 	customClaimsBytes, err := json.Marshal(customClaims)
 	if err != nil {
@@ -293,21 +294,21 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) (*e
 		})
 	}
 
-	accessTokenExpiredAt := time.Now().Add(30 * time.Minute).UnixMilli()
+	accessTokenExpiredAt := time.Now().Add(30 * time.Minute).Unix()
 
 	accessToken, err := s.jwt.CreateAndSign(customClaimsBytes, accessTokenExpiredAt)
 	if err != nil {
 		return nil, apperror.InternalServerError(apperror.AppErrorOpt{
-			Message: fmt.Sprintf("[account_service][Login][json.Marshal][Access] Error: %s | account_id: %v", err.Error(), account.Id),
+			Message: fmt.Sprintf("[account_service][Login][jwt.CreateAndSign][Access] Error: %s | account_id: %v", err.Error(), account.Id),
 		})
 	}
 
-	refreshTokenExpiredAt := time.Now().Add(24 * time.Hour).UnixMilli()
+	refreshTokenExpiredAt := time.Now().Add(24 * time.Hour).Unix()
 
 	refreshToken, err := s.jwt.CreateAndSign(customClaimsBytes, refreshTokenExpiredAt)
 	if err != nil {
 		return nil, apperror.InternalServerError(apperror.AppErrorOpt{
-			Message: fmt.Sprintf("[account_service][Login][json.Marshal][Refresh] Error: %s | account_id: %v", err.Error(), account.Id),
+			Message: fmt.Sprintf("[account_service][Login][jwt.CreateAndSign][Refresh] Error: %s | account_id: %v", err.Error(), account.Id),
 		})
 	}
 
@@ -317,7 +318,7 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) (*e
 
 		err := s.refreshTokenRepo.InsertToken(ctx, refreshToken, account.Id, accountDevice.DeviceId, refreshTokenExpiredAt)
 		if err != nil {
-			s.log.WithFields(logrus.Fields{
+			logrus.WithFields(logrus.Fields{
 				"error":      err.Error(),
 				"account_id": account.Id,
 			}).Error("[account_service][Login][refreshTokenRepo.InsertToken][sub-routine]")
@@ -325,11 +326,11 @@ func (s *accountServiceImpl) Login(ctx context.Context, req entity.LoginReq) (*e
 	}()
 
 	return &entity.TokenData{
-		AccessToken: entity.Token{
+		AccessToken: &entity.Token{
 			Token:     accessToken,
 			ExpiredAt: accessTokenExpiredAt,
 		},
-		RefreshToken: entity.Token{
+		RefreshToken: &entity.Token{
 			Token:     refreshToken,
 			ExpiredAt: refreshTokenExpiredAt,
 		},

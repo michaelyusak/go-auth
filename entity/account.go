@@ -23,6 +23,6 @@ type Token struct {
 }
 
 type TokenData struct {
-	AccessToken  Token `json:"access_token"`
-	RefreshToken Token `json:"refresh_token"`
+	AccessToken  *Token `json:"access_token"`
+	RefreshToken *Token `json:"refresh_token,omitempty"`
 }

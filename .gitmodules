@@ -1,3 +1,0 @@
-[submodule "go-helper"]
-	path = go-helper
-	url = git@github.com:michaelyusak/go-helper.git
